@@ -1,0 +1,128 @@
+name: "SQLi Security Scan"
+description: "Detecta vulnerabilidades de SQL Injection em APIs usando GANs integradas ao Swagger/OpenAPI"
+author: "Pedro Ulisses"
+
+branding:
+  icon: "shield"
+  color: "red"
+
+inputs:
+  swagger-url:
+    description: "URL ou caminho do Swagger/OpenAPI da API alvo"
+    required: true
+  base-url:
+    description: "URL base da API alvo"
+    required: true
+  num-payloads:
+    description: "Número de payloads a gerar por endpoint"
+    required: false
+    default: "200"
+  temperature:
+    description: "Temperatura da geração (0.1 a 1.0)"
+    required: false
+    default: "0.7"
+  report-path:
+    description: "Caminho para salvar o relatório"
+    required: false
+    default: "reports/scan_report.json"
+  auth-token:
+    description: "Token de autenticação para a API (ex: 'Bearer abc123')"
+    required: false
+    default: ""
+  fail-on-vuln:
+    description: "Falhar o pipeline se vulnerabilidades forem encontradas"
+    required: false
+    default: "true"
+  python-version:
+    description: "Versão do Python a usar"
+    required: false
+    default: "3.11"
+
+outputs:
+  vulnerable:
+    description: "true se vulnerabilidades foram encontradas"
+    value: ${{ steps.scan.outputs.vulnerable }}
+  total-attacks:
+    description: "Total de ataques disparados"
+    value: ${{ steps.scan.outputs.total-attacks }}
+  true-positives:
+    description: "Número de verdadeiros positivos"
+    value: ${{ steps.scan.outputs.true-positives }}
+  precision:
+    description: "Precisão da detecção"
+    value: ${{ steps.scan.outputs.precision }}
+  efficacy:
+    description: "Eficácia dos ataques"
+    value: ${{ steps.scan.outputs.efficacy }}
+  execution-time:
+    description: "Tempo de execução em segundos"
+    value: ${{ steps.scan.outputs.execution-time }}
+  report-path:
+    description: "Caminho do relatório gerado"
+    value: ${{ steps.scan.outputs.report-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout do Scanner
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ github.action_repository }}
+        ref: ${{ github.action_ref }}
+        path: .sqli-scanner
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: "pip"
+        cache-dependency-path: .sqli-scanner/requirements.txt
+
+    - name: Instalar dependências do Scanner
+      shell: bash
+      run: |
+        pip install --no-cache-dir -r .sqli-scanner/requirements.txt
+
+    - name: Baixar/preparar Swagger
+      id: swagger
+      shell: bash
+      run: |
+        SWAGGER_INPUT="${{ inputs.swagger-url }}"
+        if [[ "$SWAGGER_INPUT" == http://* ]] || [[ "$SWAGGER_INPUT" == https://* ]]; then
+          curl -sSfL "$SWAGGER_INPUT" -o .sqli-scanner/swagger_spec.json
+          echo "path=swagger_spec.json" >> "$GITHUB_OUTPUT"
+        else
+          echo "path=${{ github.workspace }}/$SWAGGER_INPUT" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Executar Scan
+      id: scan
+      shell: bash
+      working-directory: .sqli-scanner
+      run: |
+        AUTH_ARGS=""
+        if [ -n "${{ inputs.auth-token }}" ]; then
+          AUTH_ARGS="--auth-token \"${{ inputs.auth-token }}\""
+        fi
+
+        python main.py scan \
+          --swagger "${{ steps.swagger.outputs.path }}" \
+          --base-url "${{ inputs.base-url }}" \
+          --num-payloads "${{ inputs.num-payloads }}" \
+          --temperature "${{ inputs.temperature }}" \
+          --output "${{ github.workspace }}/${{ inputs.report-path }}" \
+          $AUTH_ARGS
+
+    - name: Upload relatório como artefato
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sqli-scan-report
+        path: ${{ inputs.report-path }}
+
+    - name: Verificar vulnerabilidades
+      if: steps.scan.outputs.vulnerable == 'true' && inputs.fail-on-vuln == 'true'
+      shell: bash
+      run: |
+        echo "::error::Vulnerabilidades de SQL Injection detectadas! Verifique o relatório."
+        exit 1
