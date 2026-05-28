@@ -218,4 +218,3 @@ __marimo__/
 # reports and models directory
 models/checkpoint_*.pt
 models/gan_sqli[0-9]*.pt
-reports/*
