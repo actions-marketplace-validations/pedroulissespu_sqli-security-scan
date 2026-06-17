@@ -1,7 +1,7 @@
 import re
 import torch
 from scanner.gan.models import Generator
-from scanner.gan.preprocessing import decode_indices, SOS_TOKEN, EOS_TOKEN, PAD_TOKEN
+from scanner.gan.preprocessing import decode_indices, SOS_TOKEN
 
 
 # Padrões SQL mínimos que um payload válido deve conter
